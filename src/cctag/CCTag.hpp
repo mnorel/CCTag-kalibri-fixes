@@ -372,12 +372,7 @@ public:
 
 protected:
 
-  void setInitRadius()
-  {
-    _radiusRatios.resize(CCTag::_radiusRatiosInit.size());
-    std::copy(CCTag::_radiusRatiosInit.begin(), CCTag::_radiusRatiosInit.end(), _radiusRatios.begin());
-    _nCircles = CCTag::_radiusRatiosInit.size() + 1;
-  }
+  void setInitRadius();
 
 protected:
   static const boost::array<float, 5> _radiusRatiosInit;

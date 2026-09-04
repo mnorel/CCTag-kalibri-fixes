@@ -38,6 +38,12 @@ const boost::array<float, 5> CCTag::_radiusRatiosInit =
   (29.0f / 25.0f)
 };
 
+void CCTag::setInitRadius()
+{
+  _radiusRatios.assign(_radiusRatiosInit.begin(), _radiusRatiosInit.end());
+  _nCircles = _radiusRatiosInit.size() + 1;
+}
+
 bool CCTag::isEqual(const CCTag& marker) const
 {
   using namespace cctag::numerical::geometry;
