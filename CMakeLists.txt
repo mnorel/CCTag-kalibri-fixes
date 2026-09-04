@@ -231,7 +231,12 @@ else(CCTAG_WITH_CUDA)
 endif(CCTAG_WITH_CUDA)
 
 # FIND OPENCV
-find_package(OpenCV REQUIRED core videoio imgproc imgcodecs)
+# The library itself does not use videoio; only the optional applications do.
+set(CCTAG_OPENCV_COMPONENTS core imgproc imgcodecs)
+if(CCTAG_BUILD_APPS)
+  list(APPEND CCTAG_OPENCV_COMPONENTS videoio)
+endif()
+find_package(OpenCV REQUIRED COMPONENTS ${CCTAG_OPENCV_COMPONENTS})
 
 # FIND Eigen
 set(CCTAG_EIGEN_REQUIRED_VERSION 3.3.9)
