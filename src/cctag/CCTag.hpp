@@ -86,7 +86,9 @@ public:
 #endif
   {
     setInitRadius();
-    _outerEllipse.setCenter( Point2d<Eigen::Vector3f>(_outerEllipse.center().x()+0.5f, _outerEllipse.center().y()+0.5f ) ); // todo@Lilian: + 0.5f
+    // centerImg, points, the homography and the fitted ellipse are all expressed
+    // in the same OpenCV pixel-centre coordinate system.  Shifting only the
+    // ellipse here makes the identification/refinement geometry inconsistent.
     cctag::numerical::geometry::scale(_outerEllipse, _rescaledOuterEllipse, scale);
     
     _status = 0;
