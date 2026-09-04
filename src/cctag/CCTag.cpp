@@ -29,6 +29,11 @@ namespace cctag
 
 namespace optimization = cctag::numerical::optimization;
 
+int kalibriPatchLevel() noexcept
+{
+  return CCTAG_KALIBRI_PATCH_LEVEL;
+}
+
 const boost::array<float, 5> CCTag::_radiusRatiosInit =
 {
   (29.0f / 9.0f),
