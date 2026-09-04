@@ -1215,10 +1215,15 @@ int identify_step_1(
   // In fact, the white area located inside the inner ellipse does not hold
   // any information neither for the optimization nor for the reading.
   float startSig = 0.f;
-  if (params._nCrowns == 3)
+  if (params._nCrowns == 2)
   {
-    // Signal begin at 25% of the unit radius (for 3 black rings markers).
-    // startOffset
+    // Unencoded two-crown targets use the complete radial signal, including
+    // the central disc. This is the established Kalibri localization path.
+    startSig = 0.f;
+  }
+  else if (params._nCrowns == 3)
+  {
+    // Signal begin at 25% of the unit radius (for 3 black crowns markers).
     startSig = 1 - (2*params._nCrowns-1)*0.15f;
   }
   else if (params._nCrowns == 4)
@@ -1365,6 +1370,16 @@ int identify_step_2(
     CCTAG_COUT_VAR_DEBUG(cctag.centerImg());
     DO_TALK( CCTAG_COUT_DEBUG( "Optimization on imaged center failed to converge." ); )
     return status::opti_has_diverged;
+  }
+
+  // An empty bank explicitly requests localization only. The nonlinear centre
+  // refinement above is still performed, but no marker ID is assigned. This
+  // enables unencoded two-crown calibration targets without inventing IDs.
+  if (radiusRatios.empty())
+  {
+    cctag.setId(-1);
+    cctag.setIdSet({});
+    return status::id_reliable;
   }
   
   MarkerID id = -1;
