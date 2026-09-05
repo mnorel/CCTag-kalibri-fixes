@@ -100,6 +100,9 @@ static void constructFlowComponentFromSeed(
       if (votersSize > 0)
         ++nVotedPoints;
     }
+
+    if (nVotedPoints == 0)
+      return;
     
     {
       std::lock_guard<std::mutex> lock(G_SortMutex);
@@ -156,6 +159,9 @@ static void completeFlowComponent(
     std::size_t nLabel = -1;
 
     {
+      // Candidates overlap, so segment labels must be inspected and assigned
+      // atomically as one operation.
+      std::lock_guard<std::mutex> lock(G_UpdateMutex);
       ssize_t nSegmentCommon = -1;
 
       for(EdgePoint * p : filteredChildren)
@@ -170,11 +176,8 @@ static void completeFlowComponent(
 
       if (nSegmentCommon == -1)
       {
-        {
-          std::lock_guard<std::mutex> lock(G_UpdateMutex);
-          nLabel = nSegmentOut;
-          ++nSegmentOut;
-        }
+        nLabel = nSegmentOut;
+        ++nSegmentOut;
       }
       else
       {
@@ -611,19 +614,11 @@ void cctagDetectionFromEdges(
   // The edge points lying on the inner ellipse and their voters (lying on the outer ellipse)
   // will be collected and constitute the initial data of a flow component.
   
-#ifndef CCTAG_SERIALIZE
-  tbb::parallel_for(size_t(0), nSeedsToProcess, [&](int iSeed) {
-#else 
   for(size_t iSeed=0 ; iSeed < nSeedsToProcess; ++iSeed)
   {
-#endif
     assert( seeds[iSeed] );
     constructFlowComponentFromSeed(seeds[iSeed], edgeCollection, vCandidateLoopOne, params);
-#ifndef CCTAG_SERIALIZE
-  });
-#else
   }
-#endif
 
   const std::size_t nFlowComponentToProcessLoopTwo = 
           std::min(vCandidateLoopOne.size(), params._maximumNbCandidatesLoopTwo);
@@ -639,19 +634,11 @@ void cctagDetectionFromEdges(
   CCTagVisualDebug::instance().initBackgroundImage(src);
   CCTagVisualDebug::instance().newSession( "completeFlowComponent" );
   
-#ifndef CCTAG_SERIALIZE
-  tbb::parallel_for(size_t(0), nFlowComponentToProcessLoopTwo, [&](size_t iCandidate) {
-#else
-    for(size_t iCandidate=0 ; iCandidate < nFlowComponentToProcessLoopTwo; ++iCandidate)
-    {
-#endif
-      size_t runId = iCandidate;
-      completeFlowComponent(*vCandidateLoopOne[iCandidate], edgeCollection, vCandidateLoopTwo, nSegmentOut, runId, params);
-#ifndef CCTAG_SERIALIZE  
-    });
-#else
+  for(size_t iCandidate=0 ; iCandidate < nFlowComponentToProcessLoopTwo; ++iCandidate)
+  {
+    size_t runId = iCandidate;
+    completeFlowComponent(*vCandidateLoopOne[iCandidate], edgeCollection, vCandidateLoopTwo, nSegmentOut, runId, params);
   }
-#endif
   
   DO_TALK(
     CCTAG_COUT_VAR_DEBUG(vCandidateLoopTwo.size());
@@ -675,16 +662,17 @@ void cctagDetectionFromEdges(
 
   const size_t candidateLoopTwoCount = vCandidateLoopTwo.size();
 
-#ifndef CCTAG_SERIALIZE
-  tbb::parallel_for(size_t(0), candidateLoopTwoCount, [&](size_t iCandidate) {
-#else
-  for(size_t iCandidate=0 ; iCandidate < vCandidateLoopTwo.size(); ++iCandidate)
-#endif
+  for(size_t iCandidate=0 ; iCandidate < candidateLoopTwoCount; ++iCandidate)
+  {
     cctagDetectionFromEdgesLoopTwoIteration(markers, edgeCollection, vCandidateLoopTwo, iCandidate,
       pyramidLevel, scale, params);
-#ifndef CCTAG_SERIALIZE
+  }
+
+  // Parallel detection appends in scheduler order. Keep the public result
+  // deterministic so downstream duplicate selection cannot depend on timing.
+  markers.sort([](const CCTag& lhs, const CCTag& rhs) {
+    return lhs.y() < rhs.y() || (lhs.y() == rhs.y() && lhs.x() < rhs.x());
   });
-#endif
   
   boost::posix_time::ptime tstop2(boost::posix_time::microsec_clock::local_time());
   boost::posix_time::time_duration d2 = tstop2 - tstop1;

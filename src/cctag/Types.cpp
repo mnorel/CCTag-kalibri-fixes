@@ -17,8 +17,8 @@ EdgePointCollection::EdgePointCollection(size_t w, size_t h) :
   _linkList(new int[2*MAX_POINTS]),
   _votersIndex(new int[MAX_POINTS+CUDA_OFFSET]),
   _votersList(new int[MAX_VOTERLIST_SIZE]),
-  _processedIn(new unsigned[MAX_POINTS/4]),
-  _processedAux(new unsigned[MAX_POINTS/4])
+  _processedIn(new unsigned[(MAX_POINTS+31)/32]),
+  _processedAux(new unsigned[(MAX_POINTS+31)/32])
 {
   if (w*h > MAX_RESOLUTION*MAX_RESOLUTION)
     throw std::length_error("EdgePointCollection::set_frame_size: image resolution is too large");
@@ -27,14 +27,8 @@ EdgePointCollection::EdgePointCollection(size_t w, size_t h) :
   _edgeMapShape[0] = w; _edgeMapShape[1] = h;
   memset(&_edgeMap[0], -1, w*h*sizeof(int));  // XXX@stian: unnecessary for CUDA
   
-  if (w*h/8+4 < MAX_POINTS) {
-    memset(&_processedIn[0], 0, w*h/8+4);     // one bit per pixel + roundoff error
-    memset(&_processedAux[0], 0, w*h/8+4);    // ditto.
-  }
-  else {
-    memset(&_processedIn[0], 0, MAX_POINTS);
-    memset(&_processedAux[0], 0, MAX_POINTS);
-  }
+  memset(&_processedIn[0], 0, ((MAX_POINTS+31)/32)*sizeof(unsigned));
+  memset(&_processedAux[0], 0, ((MAX_POINTS+31)/32)*sizeof(unsigned));
 }
 
 void EdgePointCollection::add_point(int vx, int vy, float vdx, float vdy)

@@ -52,15 +52,15 @@ private:
   {
     if (i >= MAX_POINTS)
       throw std::out_of_range("EdgePointCollection::set_bit");
-    if (f) v[i/4] |=   1U << (i & 31);
-    else   v[i/4] &= ~(1U << (i & 31));
+    if (f) v[i/32] |=   1U << (i & 31);
+    else   v[i/32] &= ~(1U << (i & 31));
   }
   
   static bool test_bit(unsigned* v, size_t i)
   {
     if (i >= MAX_POINTS)
       throw std::out_of_range("EdgePointCollection::test_bit");
-    return v[i/4] & (1U << (i & 31));
+    return v[i/32] & (1U << (i & 31));
   }
   
 public:

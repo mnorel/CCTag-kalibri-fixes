@@ -97,27 +97,11 @@ inline bool isOnTheSameSide(const Point2d<Eigen::Vector3f> & p1, const Point2d<E
   //return ( ublas::inner_prod( p1, line ) * ublas::inner_prod( p2, line ) > 0 ) ;
 }
 
-/** @brief Search recursively connected points from a point and add it in pts if it is in the ellipse hull
- * @param list of points to complete
- * @param img map of edge points
- * @param map of already processed edge points
- * @param abscissa of the point
- * @param ordinate of the point
- */
-void connectedPoint( std::vector<EdgePoint*>& pts, int runId, const EdgePointCollection& img, cctag::numerical::geometry::Ellipse& qIn, cctag::numerical::geometry::Ellipse& qOut, int x, int y );
-
 /** @brief Compute the hull from ellipse
  * @param ellipse ellipse from which the hull is computed
  * @param delta larger of the hull
  */
 void computeHull( const cctag::numerical::geometry::Ellipse& ellipse, float delta, cctag::numerical::geometry::Ellipse& qIn, cctag::numerical::geometry::Ellipse& qOut );
-
-/** @brief Ellipse hull
- * @param[in,out] pts initial points to compute all the points which are in the hull formed by the ellipse
- * which fits pt. New points will be added in pts
- * @param ellipse ellipse is an optionnal parameter if the user decide to choose his hull from an ellipse
- */
-void ellipseHull( const EdgePointCollection& img, std::vector<EdgePoint*>& pts, cctag::numerical::geometry::Ellipse& ellipse, float delta, std::size_t runId);
 
 /** @brief Ellipse growing
  * @param children vote winner children points
