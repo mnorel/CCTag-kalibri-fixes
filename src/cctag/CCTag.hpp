@@ -44,7 +44,7 @@ namespace cctag
 // Incremented when a Kalibri-required behavioral/coordinate-system fix changes.
 // The runtime function detects a stale or wrong shared library even when the
 // application was compiled against the corrected header.
-#define CCTAG_KALIBRI_PATCH_LEVEL 4
+#define CCTAG_KALIBRI_PATCH_LEVEL 5
 int kalibriPatchLevel() noexcept;
 
 using IdSet = std::vector< std::pair< MarkerID, float >>;

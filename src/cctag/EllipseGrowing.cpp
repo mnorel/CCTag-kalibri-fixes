@@ -38,6 +38,30 @@
 namespace cctag
 {
 
+namespace {
+
+bool visitTest(const std::vector<unsigned char>& visited, const EdgePointCollection& img, const EdgePoint* p)
+{
+  const int i = img(p);
+  return i >= 0 && visited[static_cast<std::size_t>(i)] != 0;
+}
+
+void visitMark(std::vector<unsigned char>& visited, const EdgePointCollection& img, EdgePoint* p)
+{
+  const int i = img(p);
+  if (i >= 0)
+  {
+    visited[static_cast<std::size_t>(i)] = 1;
+  }
+}
+
+std::vector<unsigned char> makeVisitMarks(EdgePointCollection& img)
+{
+  return std::vector<unsigned char>(static_cast<std::size_t>(std::max(img.get_point_count(), 0)), 0);
+}
+
+} // namespace
+
 bool initMarkerCenter(cctag::Point2d<Eigen::Vector3f> & markerCenter,
         const std::vector< std::vector< Point2d<Eigen::Vector3f> > > & markerPoints,
         int realPixelPerimeter)
@@ -100,7 +124,7 @@ bool addCandidateFlowtoCCTag(EdgePointCollection& edgeCollection,
     itp->reserve(filteredChildren.size());
   }
 
-  std::list<EdgePoint*> vProcessedEdgePoint;
+  std::vector<unsigned char> visited = makeVisitMarks(edgeCollection);
 
   DO_TALK( CCTAG_COUT_VAR_DEBUG(outerEllipse); )
 
@@ -135,12 +159,11 @@ bool addCandidateFlowtoCCTag(EdgePointCollection& edgeCollection,
       }
 
 
-      if (!edgeCollection.test_processed_aux(p))
+      if (!visitTest(visited, edgeCollection, p))
       {
         //CCTAG_COUT(*p);
 
-        edgeCollection.set_processed_aux(p, true);
-        vProcessedEdgePoint.push_back(p);
+        visitMark(visited, edgeCollection, p);
 
         float normGrad = sqrt(p->dX() * p->dX() + p->dY() * p->dY());
 
@@ -175,18 +198,12 @@ bool addCandidateFlowtoCCTag(EdgePointCollection& edgeCollection,
           CCTagFileDebug::instance().outputFlowComponentAssemblingInfos(PTS_OUT_WHILE_ASSEMBLING);
           cctagPoints.clear();
 
-          for (EdgePoint* point : vProcessedEdgePoint)
-            edgeCollection.set_processed_aux(point, false);
-
           return false;
         }
       }
       dir = -dir;
     }
   }
-
-  for (EdgePoint* point : vProcessedEdgePoint)
-    edgeCollection.set_processed_aux(point, false);
 
   //std::cin.ignore().get();
 
