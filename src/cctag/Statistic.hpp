@@ -73,6 +73,7 @@ void rand_n_k(Container &container, size_t N, size_t K)
 #endif
 
 void rand_5_k(std::array<int, 5>& perm, size_t N);
+void reset_rand_5_k();
 
 // median(X) is the median value of the elements in X.
 float median( std::vector<float>& v );

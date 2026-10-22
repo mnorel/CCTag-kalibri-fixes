@@ -48,8 +48,6 @@
 #include <cctag/cuda/cctag_cuda_runtime.h> // only for debugging
 #endif // CCTAG_WITH_CUDA
 
-#include <tbb/tbb.h>
-
 using namespace std;
 
 namespace cctag
@@ -776,6 +774,7 @@ void cctagDetection(
     if( durations ) durations->log( "start" );
   
     std::srand(1);
+    numerical::reset_rand_5_k();
 
 #ifdef CCTAG_WITH_CUDA
     bool cuda_allocates = params._useCuda;

@@ -5,6 +5,17 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Kalibri patch 9 (2026-10-22)
+
+- Refine outer-edge positions with the positive-gradient centroid and refit the
+  localization conic from subpixel endpoints.
+- Preserve strongly blurred encoded-tag coverage with separate peak-based ID
+  sampling; retain the existing binary decoder and probability threshold.
+- Keep valid geometric centres when nonlinear refinement fails.
+- Make identification reductions and random fitting samples reproducible, and
+  recompute ellipse conditioning for every marker.
+- Process application image sequences serially for reproducible output.
+
 ## [Unreleased]
 
 ### Added

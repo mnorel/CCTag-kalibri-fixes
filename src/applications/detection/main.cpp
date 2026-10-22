@@ -31,7 +31,6 @@
 #include <devil_cpp_wrapper.hpp>
 #endif
 
-#include <tbb/tbb.h>
 
 #include <exception>
 #include <fstream>
@@ -489,21 +488,14 @@ int main(int argc, char** argv)
 
         std::size_t frameId = 0;
 
-        std::map<int, bfs::path> files[2];
-        for(const auto& fileInFolder : vFileInFolder)
+        for(const auto& inputImageFile : vFileInFolder)
         {
-            files[frameId & 1].insert(std::pair<int, bfs::path>(frameId, fileInFolder));
-            frameId++;
-        }
-
-        tbb::parallel_for(0, 2, [&](size_t fileListIdx) {
-            for(const auto& fileInFolder : files[fileListIdx])
+            const std::size_t currentFrame = frameId++;
             {
-                const std::string subExt(fileInFolder.second.extension().string());
+                const std::string subExt(inputImageFile.extension().string());
 
                 if((subExt == ".png") || (subExt == ".jpg") || (subExt == ".PNG") || (subExt == ".JPG"))
                 {
-                    const auto inputImageFile = fileInFolder.second;
                     std::cerr << "Processing image " << inputImageFile << std::endl;
 
                     cv::Mat src;
@@ -513,10 +505,10 @@ int main(int argc, char** argv)
                     cv::cvtColor(src, imgGray, CV_BGR2GRAY);
 
                     // Call the CCTag detection
-                    int pipeId = (fileInFolder.first & 1);
+                    int pipeId = 0;
                     boost::ptr_list<CCTag> markers;
 #ifdef PRINT_TO_CERR
-                    detection(fileInFolder.first,
+                    detection(currentFrame,
                               pipeId,
                               imgGray,
                               params,
@@ -525,7 +517,7 @@ int main(int argc, char** argv)
                               std::cerr,
                               inputImageFile.stem().string());
 #else
-          detection(fileInFolder.first, pipeId, imgGray, params, bank, markers, outputFile, inputImageFile.second.stem().string());
+          detection(currentFrame, pipeId, imgGray, params, bank, markers, outputFile, inputImageFile.stem().string());
 #endif
                     // if the original image is b/w convert it to BGRA so we can draw colors
                     if(src.channels() == 1)
@@ -544,10 +536,10 @@ int main(int argc, char** argv)
                         cv::imwrite(saveFilename.string(), src);
                     }
 
-                    std::cerr << "Done processing image " << fileInFolder.second.string() << std::endl;
+                    std::cerr << "Done processing image " << inputImageFile.string() << std::endl;
                 }
             }
-        });
+        }
     }
     else
     {

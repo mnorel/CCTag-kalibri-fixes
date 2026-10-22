@@ -7,6 +7,7 @@
  */
 #include <cctag/Identification.hpp>
 #include <cctag/ImageCut.hpp>
+#include <cctag/Fitting.hpp>
 #include <cctag/optimization/conditioner.hpp>
 #include <cctag/geometry/2DTransform.hpp>
 #include <cctag/utils/Defines.hpp>
@@ -28,10 +29,9 @@
 #include <boost/assert.hpp>
 
 #include <cmath>
-#include <mutex>
+#include <stdexcept>
+#include <utility>
 #include <vector>
-
-#include <tbb/tbb.h>
 
 #include "cctag/cuda/onoff.h"
 
@@ -72,9 +72,12 @@ bool orazioDistanceRobust(
 #endif // GRIFF_DEBUG
   
   const size_t cut_count = cuts.size();
-  static std::mutex vscore_mutex;
-
-  tbb::parallel_for(size_t(0), cut_count, [&](size_t i) {
+  // Identification must be reproducible.  Processing cuts concurrently and
+  // appending their scores under a mutex made the floating-point reduction
+  // order depend on the TBB scheduler.  It also made concurrent detector calls
+  // contend on process-global state.  Keep the canonical cut order here; the
+  // detector's geometry stages are deliberately serial for the same reason.
+  for (size_t i = 0; i < cut_count; ++i) {
     const cctag::ImageCut& cut = cuts[i];
     if ( !cut.outOfBounds() )
     {
@@ -180,12 +183,9 @@ bool orazioDistanceRobust(
       assert( vScore.size() > _debug_m );
   #endif // GRIFF_DEBUG
 
-      {
-        std::lock_guard<std::mutex> lock(vscore_mutex);
-        vScore[idSet.front().first].push_back(idSet.front().second);
-      }
+      vScore[idSet.front().first].push_back(idSet.front().second);
     }
-  });
+  }
   return true;
 }
 
@@ -596,7 +596,9 @@ void selectCutCheapUniform( std::vector< cctag::ImageCut > & vSelectedCuts,
 }
 
 /* Ugly -> perform an iterative optimization*/
-bool outerEdgeRefinement(ImageCut & cut, const cv::Mat & src, float scale, std::size_t numSamplesOuterEdgePointsRefinement)
+static std::pair<float,float> convImageCutImpl(const std::vector<float> & kernel, ImageCut & cut, bool useCentroid);
+
+static bool outerEdgeRefinementImpl(ImageCut & cut, const cv::Mat & src, float scale, std::size_t numSamplesOuterEdgePointsRefinement, bool useCentroid)
 {
     // Subpixellic refinement of the outer edge points ///////////////////////////
     const float cutLengthOuterPointRefine = 3.f * sqrt(2.f) * scale; // with scale=2^i, i=0..nLevel
@@ -635,7 +637,7 @@ bool outerEdgeRefinement(ImageCut & cut, const cv::Mat & src, float scale, std::
     
     for(size_t i=0; i<3 ; ++i)
     {
-      res.insert(convImageCut(vKernels[i], cutOnOuterPoint));
+      res.insert(convImageCutImpl(vKernels[i], cutOnOuterPoint, useCentroid));
     }
     // Get the location of the highest peak (last element)
     float maxLocation = res.rbegin()->second;
@@ -651,7 +653,12 @@ bool outerEdgeRefinement(ImageCut & cut, const cv::Mat & src, float scale, std::
     return true;
 }
 
-std::pair<float,float> convImageCut(const std::vector<float> & kernel, ImageCut & cut)
+bool outerEdgeRefinement(ImageCut & cut, const cv::Mat & src, float scale, std::size_t samples)
+{
+  return outerEdgeRefinementImpl(cut, src, scale, samples, true);
+}
+
+static std::pair<float,float> convImageCutImpl(const std::vector<float> & kernel, ImageCut & cut, bool useCentroid)
 {
   //double guassOneD[] = { 0.0044, 0.0540, 0.2420, 0.3991, 0.2420, 0.0540, 0.0044 };
   
@@ -697,11 +704,24 @@ std::pair<float,float> convImageCut(const std::vector<float> & kernel, ImageCut 
   // Locate the maximum value.
   auto maxValueIt = std::max_element(output.begin(), output.end());
   float itsLocation = (float) std::distance(output.begin(), maxValueIt);
+  double gradientMass = 0., gradientMoment = 0.;
+  for (std::size_t i = 0; i < output.size(); ++i) {
+    const double weight = std::max(0.f, output[i]);
+    gradientMass += weight;
+    gradientMoment += weight * i;
+  }
+  if (useCentroid && gradientMass > 0. && std::isfinite(gradientMoment))
+    itsLocation = static_cast<float>(gradientMoment / gradientMass);
   
   //CCTAG_COUT_VAR2(*maxValueIt, itsLocation);
 
   // max value, its location
   return {*maxValueIt, itsLocation};
+}
+
+std::pair<float,float> convImageCut(const std::vector<float> & kernel, ImageCut & cut)
+{
+  return convImageCutImpl(kernel, cut, true);
 }
 
 /**
@@ -1301,6 +1321,50 @@ int identify_step_1(
   return status::id_reliable;
 }
   
+static cctag::numerical::geometry::Ellipse refinedCutEllipse(
+    const cctag::numerical::geometry::Ellipse & fallback,
+    const std::vector<cctag::ImageCut> & cuts)
+{
+  if (cuts.size() < 5) return fallback;
+  std::vector<cctag::Point2d<Eigen::Vector3f>> stops;
+  stops.reserve(cuts.size());
+  for (const auto & cut : cuts) stops.emplace_back(cut.stop().x(), cut.stop().y());
+  auto ellipse = fallback;
+  try { cctag::numerical::ellipseFitting(ellipse, stops); }
+  catch (const std::logic_error&) { return fallback; }
+  if (!std::isfinite(ellipse.center().x()) || !std::isfinite(ellipse.center().y()) ||
+      !std::isfinite(ellipse.a()) || !std::isfinite(ellipse.b()) ||
+      !std::isfinite(ellipse.angle()) || ellipse.a() <= 0.f || ellipse.b() <= 0.f)
+    return fallback;
+  return ellipse;
+}
+
+static bool readIdWithPeakEdges(std::vector<std::list<float>> & scores,
+    const RadiusRatioBank & bank, const std::vector<cctag::ImageCut> & localizationCuts,
+    const cctag::CCTag & tag, const cv::Mat & src, const cctag::Parameters & params)
+{
+  std::vector<cctag::ImageCut> readingCuts;
+  readingCuts.reserve(localizationCuts.size());
+  for (auto cut : localizationCuts)
+  {
+    const auto point = cctag::numerical::geometry::pointOnEllipse(tag.rescaledOuterEllipse(), cut.stop());
+    cut.stop() = cctag::DirectedPoint2d<Eigen::Vector3f>(point, cut.stop().dX(), cut.stop().dY());
+    if (outerEdgeRefinementImpl(cut, src, tag.scale(), params._numSamplesOuterEdgePointsRefinement, false))
+      readingCuts.push_back(std::move(cut));
+  }
+  if (readingCuts.empty()) return false;
+  const auto ellipse = refinedCutEllipse(tag.rescaledOuterEllipse(), readingCuts);
+  Eigen::Matrix3f homography;
+  try {
+    computeHomographyFromEllipseAndImagedCenter(ellipse,
+        cctag::Point2d<Eigen::Vector3f>(tag.x(), tag.y()), homography);
+  }
+  catch (const std::logic_error&) { return false; }
+  if (!homography.allFinite()) return false;
+  getSignals(readingCuts, homography, src);
+  return orazioDistanceRobust(scores, bank, readingCuts, params._minIdentProba);
+}
+
 /**
  * @brief Identify a marker:
  *   i) its imaged center is optimized: A. 1D image cuts are selected ; B. the optimization is performed 
@@ -1325,10 +1389,11 @@ int identify_step_2(
   cctag::TagPipe* cudaPipe,
   const cctag::Parameters & params)
 {
-  // Get the outer ellipse in its original scale, i.e. in src.
-  const cctag::numerical::geometry::Ellipse & ellipse = cctag.rescaledOuterEllipse();
+  const auto ellipse = refinedCutEllipse(cctag.rescaledOuterEllipse(), vSelectedCuts);
 
   float residual = std::numeric_limits<float>::max();
+  Eigen::Matrix3f refinedHomography = cctag.homography();
+  cctag::Point2d<Eigen::Vector3f> refinedCenter = cctag.centerImg();
     
   // C. Imaged center optimization /////////////////////////////////////////////
   // Expensive (GPU) Time bottleneck, the only function (including its sub functions) to be implemented on GPU
@@ -1340,8 +1405,8 @@ int identify_step_2(
   // Begin GPU //////
   bool hasConverged = refineConicFamilyGlob(
                         tagIndex,
-                        cctag.homography(),
-                        cctag.centerImg(),
+                        refinedHomography,
+                        refinedCenter,
                         vSelectedCuts,
                         src,
                         cudaPipe,
@@ -1355,8 +1420,6 @@ int identify_step_2(
                         residual
                         );
   
-  cctag.setQuality(1.f/residual);
-  
   // End GPU ////////
   // Note Outputs (GPU->CPU):
   //        The main amount of data to transfert is only that way and is 'vSelectedCuts', 
@@ -1364,13 +1427,20 @@ int identify_step_2(
   //        All the ImageCut in vSelectedCuts including their attribute _imgSignal have to be transfer back to CPU.
   //        This operation is done once per marker. A maximum of 30 markers will be processed per frame. The 
   //        maximum number of cuts will be of 50. The maximum length of each _imgSignal will of 100*float.
-  if( !hasConverged )
+  if( !hasConverged || !std::isfinite(residual) || residual <= 0.f ||
+      !std::isfinite(refinedCenter.x()) || !std::isfinite(refinedCenter.y()) )
   {
     DO_TALK( CCTAG_COUT_DEBUG(ellipse); )
     CCTAG_COUT_VAR_DEBUG(cctag.centerImg());
     DO_TALK( CCTAG_COUT_DEBUG( "Optimization on imaged center failed to converge." ); )
     return status::opti_has_diverged;
   }
+
+  // Refinement is transactional: a failed optimization must not overwrite the
+  // valid centre and homography produced by geometric detection.
+  cctag.homography() = refinedHomography;
+  cctag.setCenterImg(refinedCenter);
+  cctag.setQuality(1.f/residual);
 
   // An empty bank explicitly requests localization only. The nonlinear centre
   // refinement above is still performed, but no marker ID is assigned. This
@@ -1396,7 +1466,9 @@ int identify_step_2(
     vScore.resize(radiusRatios.size());
 
   // D. Read the rectified 1D signals and retrieve the nearest ID(s) ///////////
-  identSuccessful = orazioDistanceRobust( vScore, radiusRatios, vSelectedCuts, params._minIdentProba);
+  // Keep binary ID sampling independent of precise centre localization.
+  identSuccessful = readIdWithPeakEdges(vScore, radiusRatios, vSelectedCuts,
+                                       cctag, src, params);
     
 #ifdef CCTAG_VISUAL_DEBUG // todo: write a proper function in visual debug
   cv::Mat output;
@@ -1439,6 +1511,7 @@ int identify_step_2(
       {
         score += proba;
       }
+      if (vScore[iMax].empty()) return status::id_not_reliable;
       score /= vScore[iMax].size();
 
       // Set CCTag id

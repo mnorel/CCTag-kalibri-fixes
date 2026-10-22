@@ -21,7 +21,7 @@ inline Eigen::Matrix3f conditionerFromEllipse( const cctag::numerical::geometry:
 	Eigen::Matrix3f res;
 
 	static const float sqrt2 = std::sqrt( 2.f );
-	static const float meanAB = (ellipse.a()+ellipse.b())/2.f;
+	const float meanAB = (ellipse.a()+ellipse.b())/2.f;
 
 	//[ 2^(1/2)/a,         0, -(2^(1/2)*x0)/a]
         //[         0, 2^(1/2)/a, -(2^(1/2)*y0)/a]
